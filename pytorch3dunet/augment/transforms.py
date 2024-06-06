@@ -1,25 +1,16 @@
 import importlib
-import random
 
 import numpy as np
 import torch
-from scipy.ndimage import rotate, map_coordinates, gaussian_filter, convolve
+from scipy.ndimage import rotate, map_coordinates, gaussian_filter, binary_erosion, binary_dilation
+from scipy.ndimage.filters import convolve
 from skimage import measure
 from skimage.filters import gaussian
 from skimage.segmentation import find_boundaries
+from torchvision.transforms import Compose
 
 # WARN: use fixed random state for reproducibility; if you want to randomize on each run seed with `time.time()` e.g.
 GLOBAL_RANDOM_STATE = np.random.RandomState(47)
-
-
-class Compose(object):
-    def __init__(self, transforms):
-        self.transforms = transforms
-
-    def __call__(self, m):
-        for t in self.transforms:
-            m = t(m)
-        return m
 
 
 class RandomFlip:
@@ -30,22 +21,24 @@ class RandomFlip:
     otherwise the models won't converge.
     """
 
-    def __init__(self, random_state, axis_prob=0.5, **kwargs):
+    def __init__(self, random_state, axis_prob=0.5, execution_probability=0.1, **kwargs):
         assert random_state is not None, 'RandomState cannot be None'
         self.random_state = random_state
         self.axes = (0, 1, 2)
         self.axis_prob = axis_prob
+        self.execution_probability = execution_probability
 
     def __call__(self, m):
         assert m.ndim in [3, 4], 'Supports only 3D (DxHxW) or 4D (CxDxHxW) images'
+        if self.random_state.uniform() < self.execution_probability:
 
-        for axis in self.axes:
-            if self.random_state.uniform() > self.axis_prob:
-                if m.ndim == 3:
-                    m = np.flip(m, axis)
-                else:
-                    channels = [np.flip(m[c], axis) for c in range(m.shape[0])]
-                    m = np.stack(channels, axis=0)
+            for axis in self.axes:
+                if self.random_state.uniform() > self.axis_prob:
+                    if m.ndim == 3:
+                        m = np.flip(m, axis)
+                    else:
+                        channels = [np.flip(m[c], axis) for c in range(m.shape[0])]
+                        m = np.stack(channels, axis=0)
 
         return m
 
@@ -60,22 +53,23 @@ class RandomRotate90:
     IMPORTANT: assumes DHW axis order (that's why rotation is performed across (1,2) axis)
     """
 
-    def __init__(self, random_state, **kwargs):
+    def __init__(self, random_state, execution_probability=0.1, **kwargs):
         self.random_state = random_state
         # always rotate around z-axis
         self.axis = (1, 2)
+        self.execution_probability = execution_probability
 
     def __call__(self, m):
         assert m.ndim in [3, 4], 'Supports only 3D (DxHxW) or 4D (CxDxHxW) images'
-
-        # pick number of rotations at random
-        k = self.random_state.randint(0, 4)
-        # rotate k times around a given plane
-        if m.ndim == 3:
-            m = np.rot90(m, k, self.axis)
-        else:
-            channels = [np.rot90(m[c], k, self.axis) for c in range(m.shape[0])]
-            m = np.stack(channels, axis=0)
+        if self.random_state.uniform() < self.execution_probability:
+            # pick number of rotations at random
+            k = self.random_state.randint(0, 4)
+            # rotate k times around a given plane
+            if m.ndim == 3:
+                m = np.rot90(m, k, self.axis)
+            else:
+                channels = [np.rot90(m[c], k, self.axis) for c in range(m.shape[0])]
+                m = np.stack(channels, axis=0)
 
         return m
 
@@ -86,7 +80,7 @@ class RandomRotate:
     Rotation axis is picked at random from the list of provided axes.
     """
 
-    def __init__(self, random_state, angle_spectrum=30, axes=None, mode='reflect', order=0, **kwargs):
+    def __init__(self, random_state, angle_spectrum=30, axes=None, mode='reflect', order=0, execution_probability=0.1,**kwargs):
         if axes is None:
             axes = [(1, 0), (2, 1), (2, 0)]
         else:
@@ -97,17 +91,19 @@ class RandomRotate:
         self.axes = axes
         self.mode = mode
         self.order = order
+        self.execution_probability = execution_probability
 
     def __call__(self, m):
-        axis = self.axes[self.random_state.randint(len(self.axes))]
-        angle = self.random_state.randint(-self.angle_spectrum, self.angle_spectrum)
+        if self.random_state.uniform() < self.execution_probability:
+            axis = self.axes[self.random_state.randint(len(self.axes))]
+            angle = self.random_state.randint(-self.angle_spectrum, self.angle_spectrum)
 
-        if m.ndim == 3:
-            m = rotate(m, angle, axes=axis, reshape=False, order=self.order, mode=self.mode, cval=-1)
-        else:
-            channels = [rotate(m[c], angle, axes=axis, reshape=False, order=self.order, mode=self.mode, cval=-1) for c
-                        in range(m.shape[0])]
-            m = np.stack(channels, axis=0)
+            if m.ndim == 3:
+                m = rotate(m, angle, axes=axis, reshape=False, order=self.order, mode=self.mode, cval=-1)
+            else:
+                channels = [rotate(m[c], angle, axes=axis, reshape=False, order=self.order, mode=self.mode, cval=-1) for c
+                            in range(m.shape[0])]
+                m = np.stack(channels, axis=0)
 
         return m
 
@@ -189,6 +185,13 @@ class ElasticDeformation:
                 return np.stack(channels, axis=0)
 
         return m
+
+
+def blur_boundary(boundary, sigma):
+    boundary = gaussian(boundary, sigma=sigma)
+    boundary[boundary >= 0.5] = 1
+    boundary[boundary < 0.5] = 0
+    return boundary
 
 
 class CropToFixed:
@@ -284,7 +287,7 @@ class AbstractLabelToBoundary:
             # aggregate affinities with the same offset
             for i in range(0, len(kernels), 3):
                 # merge across X,Y,Z axes (logical OR)
-                xyz_aggregated_affinities = np.logical_or.reduce(channels[i:i + 3, ...]).astype(np.int32)
+                xyz_aggregated_affinities = np.logical_or.reduce(channels[i:i + 3, ...]).astype(np.int)
                 # recover ignore index
                 xyz_aggregated_affinities = _recover_ignore_index(xyz_aggregated_affinities, m, self.ignore_index)
                 results.append(xyz_aggregated_affinities)
@@ -302,7 +305,7 @@ class AbstractLabelToBoundary:
     def create_kernel(axis, offset):
         # create conv kernel
         k_size = offset + 1
-        k = np.zeros((1, 1, k_size), dtype=np.int32)
+        k = np.zeros((1, 1, k_size), dtype=np.int)
         k[0, 0, 0] = 1
         k[0, 0, offset] = -1
         return np.transpose(k, axis)
@@ -312,10 +315,12 @@ class AbstractLabelToBoundary:
 
 
 class StandardLabelToBoundary:
-    def __init__(self, ignore_index=None, append_label=False, mode='thick', foreground=False,
+    def __init__(self, ignore_index=None, append_label=False, blur=False, sigma=1, mode='thick', foreground=False,
                  **kwargs):
         self.ignore_index = ignore_index
         self.append_label = append_label
+        self.blur = blur
+        self.sigma = sigma
         self.mode = mode
         self.foreground = foreground
 
@@ -323,7 +328,8 @@ class StandardLabelToBoundary:
         assert m.ndim == 3
 
         boundaries = find_boundaries(m, connectivity=2, mode=self.mode)
-        boundaries = boundaries.astype('int32')
+        if self.blur:
+            boundaries = blur_boundary(boundaries, self.sigma)
 
         results = []
         if self.foreground:
@@ -334,6 +340,33 @@ class StandardLabelToBoundary:
 
         if self.append_label:
             # append original input data
+            results.append(m)
+
+        return np.stack(results, axis=0)
+
+
+class BlobsWithBoundary:
+    def __init__(self, mode=None, append_label=False, blur=False, sigma=1, **kwargs):
+        if mode is None:
+            mode = ['thick', 'inner', 'outer']
+        self.mode = mode
+        self.append_label = append_label
+        self.blur = blur
+        self.sigma = sigma
+
+    def __call__(self, m):
+        assert m.ndim == 3
+
+        # get the segmentation mask
+        results = [(m > 0).astype('uint8')]
+
+        for bm in self.mode:
+            boundary = find_boundaries(m, connectivity=2, mode=bm)
+            if self.blur:
+                boundary = blur_boundary(boundary, self.sigma)
+            results.append(boundary)
+
+        if self.append_label:
             results.append(m)
 
         return np.stack(results, axis=0)
@@ -479,6 +512,44 @@ class LabelToBoundaryAndAffinities:
         return np.concatenate((boundary, affinities), axis=0)
 
 
+class FlyWingBoundary:
+    """
+    Use if the volume contains a single pixel boundaries between labels. Gives the single pixel boundary in the 1st
+    channel and the 'thick' boundary in the 2nd channel and optional z-affinities
+    """
+
+    def __init__(self, append_label=False, thick_boundary=True, ignore_index=None, z_offsets=None, **kwargs):
+        self.append_label = append_label
+        self.thick_boundary = thick_boundary
+        self.ignore_index = ignore_index
+        self.lta = None
+        if z_offsets is not None:
+            self.lta = LabelToZAffinities(z_offsets, ignore_index=ignore_index)
+
+    def __call__(self, m):
+        boundary = (m == 0).astype('uint8')
+        results = [boundary]
+
+        if self.thick_boundary:
+            t_boundary = find_boundaries(m, connectivity=1, mode='outer', background=0)
+            results.append(t_boundary)
+
+        if self.lta is not None:
+            z_affs = self.lta(m)
+            for z_aff in z_affs:
+                results.append(z_aff)
+
+        if self.ignore_index is not None:
+            for b in results:
+                b[m == self.ignore_index] = self.ignore_index
+
+        if self.append_label:
+            # append original input data
+            results.append(m)
+
+        return np.stack(results, axis=0)
+
+
 class LabelToMaskAndAffinities:
     def __init__(self, xy_offsets, z_offsets, append_label=False, background=0, ignore_index=None, **kwargs):
         self.background = background
@@ -524,7 +595,7 @@ class Standardize:
 
 
 class PercentileNormalizer:
-    def __init__(self, pmin=1, pmax=99.6, channelwise=False, eps=1e-10, **kwargs):
+    def __init__(self, pmin, pmax, channelwise=False, eps=1e-10, **kwargs):
         self.eps = eps
         self.pmin = pmin
         self.pmax = pmax
@@ -546,64 +617,156 @@ class PercentileNormalizer:
 
 class Normalize:
     """
-    Apply simple min-max scaling to a given input tensor, i.e. shrinks the range of the data
-    in a fixed range of [-1, 1] or in case of norm01==True to [0, 1]. In addition, data can be
-    clipped by specifying min_value/max_value either globally using single values or via a
-    list/tuple channelwise if enabled.
+    Apply simple min-max scaling to a given input tensor, i.e. shrinks the range of the data in a fixed range of [-1, 1].
     """
 
-    def __init__(self, min_value=None, max_value=None, norm01=False, channelwise=False,
-                 eps=1e-10, **kwargs):
-        if min_value is not None and max_value is not None:
-            assert max_value > min_value
+    def __init__(self, min_value, max_value, **kwargs):
+        assert max_value > min_value
         self.min_value = min_value
-        self.max_value = max_value
-        self.norm01 = norm01
-        self.channelwise = channelwise
-        self.eps = eps
+        self.value_range = max_value - min_value
 
     def __call__(self, m):
-        if self.channelwise:
-            # get min/max channelwise
-            axes = list(range(m.ndim))
-            axes = tuple(axes[1:])
-            if self.min_value is None or 'None' in self.min_value:
-                min_value = np.min(m, axis=axes, keepdims=True)
+        norm_0_1 = (m - self.min_value) / self.value_range
+        return np.clip(2 * norm_0_1 - 1, -1, 1)
+    
 
-            if self.max_value is None or 'None' in self.max_value:
-                max_value = np.max(m, axis=axes, keepdims=True)
+class CropCube:
+    def __init__(self, random_state, size=(64, 128, 128), centered=True, translate_range=(0, 0, 0), **kwargs):
+        self.random_state = random_state
+        self.crop_z, self.crop_y, self.crop_x = size
+        self.centered = centered
+        self.translate_range = translate_range
 
-            # check if non None in self.min_value/self.max_value
-            # if present and if so copy value to min_value
-            if self.min_value is not None:
-                for i,v in enumerate(self.min_value):
-                    if v != 'None':
-                        min_value[i] = v
+    def __call__(self, m):
+        def _padding(pad_total):
+            half_total = pad_total // 2
+            return (half_total, pad_total - half_total)
 
-            if self.max_value is not None:
-                for i,v in enumerate(self.max_value):
-                    if v != 'None':
-                        max_value[i] = v
+
+
+        def _start_and_pad(crop_size, max_size, offset = 0):
+
+            if crop_size < max_size and offset == 0:
+                return (max_size - crop_size) // 2, (0, 0)
+            elif crop_size >= max_size and offset == 0:
+                return 0, _padding(crop_size - max_size)
+            
+            elif offset != 0:
+
+                assert abs(offset)+crop_size <=max_size
+
+                return (max_size - crop_size) // 2+offset, (0, 0)
+
+
+        assert m.ndim in (3, 4)
+
+        if m.ndim == 3:
+            z, y, x = m.shape
         else:
-            if self.min_value is None:
-                min_value = np.min(m)
-            else:
-                min_value = self.min_value
+            chan, z, y, x = m.shape
 
-            if self.max_value is None:
-                max_value = np.max(m)
-            else:
-                max_value = self.max_value
+        if self.centered:
+            y_start, y_pad = _start_and_pad(self.crop_y, y)
+            x_start, x_pad = _start_and_pad(self.crop_x, x)
+            z_start, z_pad = _start_and_pad(self.crop_z, z)
 
-        # calculate norm_0_1 with min_value / max_value with the same dimension
-        # in case of channelwise application
-        norm_0_1 = (m - min_value) / (max_value - min_value + self.eps)
 
-        if self.norm01 is True:
-          return np.clip(norm_0_1, 0, 1)
         else:
-          return np.clip(2 * norm_0_1 - 1, -1, 1)
 
+            z_offset = np.random.uniform(-self.translate_range(0),  self.translate_range(0))
+            y_offset = np.random.uniform(-self.translate_range(1),  self.translate_range(1))
+            x_offset = np.random.uniform(-self.translate_range(2),  self.translate_range(2))
+
+            y_start, y_pad = _start_and_pad(self.crop_y, y, y_offset)
+            x_start, x_pad = _start_and_pad(self.crop_x, x, x_offset)
+            z_start, z_pad = _start_and_pad(self.crop_z, z, z_offset)
+
+            y_start = y_start+y_offset
+            x_start = x_start+x_offset
+            z_start = z_start+z_offset
+
+
+        if m.ndim == 3:
+            result = m[z_start:z_start + self.crop_z, y_start:y_start + self.crop_y, x_start:x_start + self.crop_x]
+            return np.pad(result, pad_width=( z_pad, y_pad, x_pad), mode='reflect')
+        else:
+            channels = []
+            for c in range(m.shape[0]):
+                result = m[c][z_start:z_start + self.crop_z, y_start:y_start + self.crop_y, x_start:x_start + self.crop_x]
+                channels.append(np.pad(result, pad_width=(z_pad, y_pad, x_pad), mode='reflect'))
+            return np.stack(channels, axis=0)
+
+class CustomNormalize:
+    """
+    Apply simple min-max scaling to a given input tensor, i.e. shrinks the range of the data in a fixed range of [-1, 1].
+    """
+
+    def __init__(self, min_value, max_value, **kwargs):
+        assert max_value > min_value
+        self.min_value = min_value
+        self.value_range = max_value - min_value
+
+    def __call__(self, m):
+        
+        norm_0_1 = (m[0] - self.min_value) / self.value_range
+        m[0] = np.clip(2 * norm_0_1 - 1, -1, 1)
+        return m
+    
+class DiscardLabels:
+    def __init__(self, label_axis_to_keep = [0, 2, 3], **kwargs):
+        self.label_axis_to_keep = label_axis_to_keep
+    def __call__(self, m):
+        return m[self.label_axis_to_keep, ...]
+
+
+class CustomErode:
+    def __init__(self, random_state, max_iterations=1, execution_probability=0.1, **kwargs):
+        self.execution_probability = execution_probability
+        self.random_state = random_state
+        self.max_iterations = max_iterations
+
+
+    def __call__(self, m):
+        if self.random_state.uniform() < self.execution_probability:
+            for idx in range(3):
+
+                if self.max_iterations != 1:
+                    iterations =  self.random_state.randint(1, self.max_iterations)  
+                else:
+                    iterations = 1
+
+                m[idx+1, ...] = binary_erosion(m[idx+1, ...], iterations=iterations )
+        return m
+
+class CustomDilate:
+    def __init__(self, random_state, max_iterations=1, execution_probability=0.1, **kwargs):
+        self.execution_probability = execution_probability
+        self.random_state = random_state
+        self.max_iterations = max_iterations
+
+
+    def __call__(self, m):
+        if self.random_state.uniform() < self.execution_probability:
+            for idx in range(3):
+                if self.max_iterations != 1:
+                    iterations =  self.random_state.randint(1, self.max_iterations)  
+                else:
+                    iterations = 1
+                m[idx+1, ...] = binary_dilation(m[idx+1, ...], iterations=iterations )
+        return m
+
+class CustomAdditiveGaussianNoise:
+    def __init__(self, random_state, scale=(0.0, 1.0), execution_probability=0.1, **kwargs):
+        self.execution_probability = execution_probability
+        self.random_state = random_state
+        self.scale = scale
+
+    def __call__(self, m):
+        if self.random_state.uniform() < self.execution_probability:
+            std = self.random_state.uniform(self.scale[0], self.scale[1])
+            gaussian_noise = self.random_state.normal(0, std, size=m[0].shape)
+            m[0] = m[0] + gaussian_noise
+        return m
 
 class AdditiveGaussianNoise:
     def __init__(self, random_state, scale=(0.0, 1.0), execution_probability=0.1, **kwargs):
@@ -632,14 +795,36 @@ class AdditivePoissonNoise:
             return m + poisson_noise
         return m
 
+class CustomAdditivePoissonNoise:
+    def __init__(self, random_state, lam=(0.0, 1.0), execution_probability=0.1, **kwargs):
+        self.execution_probability = execution_probability
+        self.random_state = random_state
+        self.lam = lam
 
+    def __call__(self, m):
+        if self.random_state.uniform() < self.execution_probability:
+            lam = self.random_state.uniform(self.lam[0], self.lam[1])
+            poisson_noise = self.random_state.poisson(lam, size=m[0].shape)
+            m[0] = m[0] + poisson_noise
+        return m
+    
+class CustomMultiplicavePoissonNoise:
+    def __init__(self, random_state, lam=(1.0, 1.2), execution_probability=0.1, **kwargs):
+        self.execution_probability = execution_probability
+        self.random_state = random_state
+        self.lam = lam
+
+    def __call__(self, m):
+        if self.random_state.uniform() < self.execution_probability:
+            lam = self.random_state.uniform(self.lam[0], self.lam[1])
+            poisson_noise = self.random_state.poisson(lam, size=m[0].shape)
+            m = m * poisson_noise
+        return m
+    
 class ToTensor:
     """
-    Converts a given input numpy.ndarray into torch.Tensor.
-
-    Args:
-        expand_dims (bool): if True, adds a channel dimension to the input data
-        dtype (np.dtype): the desired output data type
+    Converts a given input numpy.ndarray into torch.Tensor. Adds additional 'channel' axis when the input is 3D
+    and expand_dims=True (use for raw data of the shape (D, H, W)).
     """
 
     def __init__(self, expand_dims, dtype=np.float32, **kwargs):
@@ -705,17 +890,16 @@ class LabelToTensor:
         return torch.from_numpy(m.astype(dtype='int64'))
 
 
-class GaussianBlur3D:
-    def __init__(self, sigma=[.1, 2.], execution_probability=0.5, **kwargs):
-        self.sigma = sigma
-        self.execution_probability = execution_probability
+class ImgNormalize:
+    def __call__(self, tensor):
+        mean = torch.mean(tensor, dim=(1, 2))
+        std = torch.std(tensor, dim=(1, 2))
+        return F.normalize(tensor, mean, std)
 
-    def __call__(self, x):
-        if random.random() < self.execution_probability:
-            sigma = random.uniform(self.sigma[0], self.sigma[1])
-            x = gaussian(x, sigma=sigma)
-            return x
-        return x
+
+def get_transformer(config, min_value, max_value, mean, std):
+    base_config = {'min_value': min_value, 'max_value': max_value, 'mean': mean, 'std': std}
+    return Transformer(config, base_config)
 
 
 class Transformer:
