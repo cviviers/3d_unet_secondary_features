@@ -839,6 +839,21 @@ class ToTensor:
 
         return torch.from_numpy(m.astype(dtype=self.dtype))
 
+class CustomNormalize:
+    """
+    Apply simple min-max scaling to a given input tensor, i.e. shrinks the range of the data in a fixed range of [-1, 1].
+    """
+
+    def __init__(self, min_value, max_value, **kwargs):
+        assert max_value > min_value
+        self.min_value = min_value
+        self.value_range = max_value - min_value
+
+    def __call__(self, m):
+        
+        norm_0_1 = (m[0] - self.min_value) / self.value_range
+        m[0] = np.clip(2 * norm_0_1 - 1, -1, 1)
+        return m
 
 class Relabel:
     """
@@ -883,19 +898,10 @@ class RgbToLabel:
         result = img[..., 0] * 65536 + img[..., 1] * 256 + img[..., 2]
         return result
 
-
 class LabelToTensor:
     def __call__(self, m):
         m = np.array(m)
         return torch.from_numpy(m.astype(dtype='int64'))
-
-
-class ImgNormalize:
-    def __call__(self, tensor):
-        mean = torch.mean(tensor, dim=(1, 2))
-        std = torch.std(tensor, dim=(1, 2))
-        return F.normalize(tensor, mean, std)
-
 
 def get_transformer(config, min_value, max_value, mean, std):
     base_config = {'min_value': min_value, 'max_value': max_value, 'mean': mean, 'std': std}
