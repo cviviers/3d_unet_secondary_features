@@ -2,9 +2,97 @@
 
 Resources shared as part the papers:
 1. [Improved Pancreatic Tumor Detection by Utilizing Clinically-Relevant Secondary Features](https://arxiv.org/abs/2208.03581) - MICCAI Cancer Prevention through early detection, Conference
-2. [Clinical Segmentation for Improved Pancreatic Ductal Adenocarcinoma Detection and Segmentation](https://www.spiedigitallibrary.org/conference-proceedings-of-spie/12465/124652M/Clinical-segmentation-for-improved-pancreatic-ductal-adenocarcinoma-detection-and-segmentation/10.1117/12.2654164.short) - SPIE Medical Imaging, Conference
-3. Improved Pancreatic Cancer Detection and Localization on CT scans: A Computer-Aided Detection model utilizing Secondary Features - TBD, Journal
+2. [Computer-Aided Detection for Pancreatic Cancer Diagnosis: Radiological Challenges and Future Directions](https://www.mdpi.com/2077-0383/12/13/4209) - Journal of Clincal Medicine
+3. [Clinical Segmentation for Improved Pancreatic Ductal Adenocarcinoma Detection and Segmentation](https://www.spiedigitallibrary.org/conference-proceedings-of-spie/12465/124652M/Clinical-segmentation-for-improved-pancreatic-ductal-adenocarcinoma-detection-and-segmentation/10.1117/12.2654164.short) - SPIE Medical Imaging, Conference
+4. Improved Pancreatic Cancer Detection and Localization on CT scans: A Computer-Aided Detection model utilizing Secondary Features - TBD, Journal
 
+
+# Example usage for PDAC detection
+
+For details refer to the papers above.
+
+### Course Pancreas
+
+Downsample the CT scans to 2x the preferred voxel resolution. The coarse pancreatic segmentation model can then be trained with:
+
+```bash
+train3dunet --config resources\3DUnet_pancreas\train\train_config_Pancreas.yaml
+``` 
+Running 
+
+```bash
+predict3dunet --config resources\3DUnet_pancreas\test\pancreas_coarse.yml
+``` 
+will enable coarse segmentations in the full CT scan. This is used to localize the pancreas efficiently.
+
+### Fine Pancreas
+
+The fine pancreatic segmentation model can then be trained with:
+
+```bash
+train3dunet --config resources\3DUnet_pancreas\train\train_config_Pancreas.yaml
+``` 
+
+We train this model on crops around the pancreas at the disired high resolution, speeding up training and eventually inference. Running 
+
+```bash
+predict3dunet --config resources\3DUnet_pancreas\test\pancreas_fine.yml
+``` 
+will enable fine segmentations in the cropped CT scan. This is used as input to the tumor segmentation model later on.
+
+### Single structure Pancreatic Duct & Common Bile Duct
+
+The models trained to segment a single secondary feature can be trained with the following
+
+```bash
+train3dunet --config resources\3DUnet_pancreas\train\train_config_CBD.yaml
+train3dunet --config resources\3DUnet_pancreas\train\train_config_PD.yaml
+``` 
+
+They are trained on the high resolution crops around the pancreas. To predict these ducts, run
+
+```bash
+predict3dunet --config resources\3DUnet_pancreas\test\cbd_fine.yml
+predict3dunet --config resources\3DUnet_pancreas\test\pd_fine.yml
+``` 
+The output of these models are utilized by the tumor segmentaion model. 
+
+### Multi structure Pancreatic Duct & Common Bile Duct
+
+The model trained to segment a both secondary features simultaneously can be trained with the following
+
+```bash
+train3dunet --config resources\3DUnet_pancreas\train\train_config_PD_CBD.yaml
+``` 
+Is is trained on the high resolution crops around the pancreas. To predict these ducts, run
+
+```bash
+predict3dunet --config resources\3DUnet_pancreas\test\cbd_pd_fine.yml
+``` 
+
+The output of this model is utilized by the tumor segmentaion model. 
+
+### Pancreatic Ductal Adneocarcinoma
+
+The PDAC segmentaion model is trained on crops around the pancreas, concatinated with segmentation maps of the pancreas, common bile duct and pancreatic duct. It is trained using the following script
+
+```bash
+train3dunet --config resources\3DUnet_pancreas\train\train_config_Tumor.yaml
+``` 
+
+At test time, run the following:
+
+```bash
+predict3dunet --config resources\3DUnet_pancreas\test\tumor.yml
+``` 
+
+# Datasets
+
+We use the [Medical Decathlon](http://medicaldecathlon.com/) dataset - Task 07 Pancreas & Tumour. A few cases were supplimented with additional annotations of the  pancreatic duct, common bile duct, pancreas and pancreatic tumour for this work. The new annotations and corresponding CT volumes (nifti) can be downloaded [here](https://drive.google.com/drive/folders/1dVXYN7i3b0nNEvFDnEYtScbZzKhezxx1?usp=sharing).
+
+# Code
+The approach is based on [https://github.com/wolny/pytorch-3dunet](https://github.com/wolny/pytorch-3dunet).
+For any further details feel free to reach out.
 
 # pytorch-3dunet
 
@@ -145,89 +233,3 @@ If not specified `MeanIoU` will be used by default.
 ### Regression
 - `PSNR` (peak signal to noise ratio)
 - `MSE` (mean squared error)
-
-## Examples
-
-### Course Pancreas
-
-Downsample the CT scans to 2x the preferred voxel resolution. The coarse pancreatic segmentation model can then be trained with:
-
-```bash
-train3dunet --config resources\3DUnet_pancreas\train\train_config_Pancreas.yaml
-``` 
-Running 
-
-```bash
-predict3dunet --config resources\3DUnet_pancreas\test\pancreas_coarse.yml
-``` 
-will enable coarse segmentations in the full CT scan. This is used to localize the pancreas efficiently.
-
-### Fine Pancreas
-
-The fine pancreatic segmentation model can then be trained with:
-
-```bash
-train3dunet --config resources\3DUnet_pancreas\train\train_config_Pancreas.yaml
-``` 
-
-We train this model on crops around the pancreas at the disired high resolution, speeding up training and eventually inference. Running 
-
-```bash
-predict3dunet --config resources\3DUnet_pancreas\test\pancreas_fine.yml
-``` 
-will enable fine segmentations in the cropped CT scan. This is used as input to the tumor segmentation model later on.
-
-### Single structure Pancreatic Duct & Common Bile Duct
-
-The models trained to segment a single secondary feature can be trained with the following
-
-```bash
-train3dunet --config resources\3DUnet_pancreas\train\train_config_CBD.yaml
-train3dunet --config resources\3DUnet_pancreas\train\train_config_PD.yaml
-``` 
-
-They are trained on the high resolution crops around the pancreas. To predict these ducts, run
-
-```bash
-predict3dunet --config resources\3DUnet_pancreas\test\cbd_fine.yml
-predict3dunet --config resources\3DUnet_pancreas\test\pd_fine.yml
-``` 
-The output of these models are utilized by the tumor segmentaion model. 
-
-### Multi structure Pancreatic Duct & Common Bile Duct
-
-The model trained to segment a both secondary features simultaneously can be trained with the following
-
-```bash
-train3dunet --config resources\3DUnet_pancreas\train\train_config_PD_CBD.yaml
-``` 
-Is is trained on the high resolution crops around the pancreas. To predict these ducts, run
-
-```bash
-predict3dunet --config resources\3DUnet_pancreas\test\cbd_pd_fine.yml
-``` 
-
-The output of this model is utilized by the tumor segmentaion model. 
-
-### Pancreatic Ductal Adneocarcinoma
-
-The PDAC segmentaion model is trained on crops around the pancreas, concatinated with segmentation maps of the pancreas, common bile duct and pancreatic duct. It is trained using the following script
-
-```bash
-train3dunet --config resources\3DUnet_pancreas\train\train_config_Tumor.yaml
-``` 
-
-At test time, run the following:
-
-```bash
-predict3dunet --config resources\3DUnet_pancreas\test\tumor.yml
-``` 
-
-# Datasets
-
-We use the [Medical Decathlon](http://medicaldecathlon.com/) dataset - Task 07 Pancreas & Tumour. A few cases were supplimented with additional annotations of the  pancreatic duct, common bile duct, pancreas and pancreatic tumour for this work. The new annotations and corresponding CT volumes (nifti) can be downloaded [here](https://drive.google.com/drive/folders/1dVXYN7i3b0nNEvFDnEYtScbZzKhezxx1?usp=sharing).
-
-# Code
-The approach is based on [https://github.com/wolny/pytorch-3dunet](https://github.com/wolny/pytorch-3dunet).
-For any further details feel free to reach out.
-
