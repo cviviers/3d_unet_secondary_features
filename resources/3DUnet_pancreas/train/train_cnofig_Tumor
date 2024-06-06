@@ -1,0 +1,196 @@
+# use a fixed random seed to guarantee that when you run the code twice you will get the same outcome
+manual_seed: 42
+# model configuration
+model:
+  # model class, e.g. UNet3D, ResidualUNet3D
+  name: ResidualUNet3D
+  # number of input channels to the model
+  in_channels: 4
+  # number of output channels
+  out_channels: 1
+  # determines the order of operators in a single layer (gcr - GroupNorm+Conv3d+ReLU)
+  layer_order: gcl
+  #  number of levels in the encoder/decoder path (applied only if f_maps is an int)
+  num_levels: 4
+  # feature maps scale factor
+  f_maps: [24, 32, 48, 16]
+  # number of groups in the groupnorm
+  num_groups: 8
+  # apply element-wise nn.Sigmoid after the final 1x1 convolution, otherwise apply nn.Softmax
+  final_sigmoid: true
+  # if True applies the final normalization layer (sigmoid or softmax), otherwise the networks returns the output from the final convolution layer; use False for regression problems, e.g. de-noising
+  is_segmentation: true
+  # auxiliary classifcation head number of classes
+  # aux_class: 1
+# trainer configuration
+trainer:
+  # path to the checkpoint directory
+  checkpoint_dir: "CHECKPOINT_DIR/4D_tumour"
+  # path to latest checkpoint; if provided the training will be resumed from that checkpoint
+  resume: null
+  # how many iterations between validations
+  validate_after_iters: 200
+  # how many iterations between tensorboard logging
+  log_after_iters: 200
+  # max number of epochs
+  max_num_epochs: 300
+  # max number of iterations
+  max_num_iterations: 1000000
+  # model with higher eval score is considered better
+  eval_score_higher_is_better: True
+# optimizer configuration
+optimizer:
+  # initial learning rate
+  name: AdamW
+  learning_rate: 0.001
+  # weight decay
+  weight_decay: 0.02
+# loss function configuration
+loss:
+  # loss function to be used during training
+  name: BCEWithLogitsLoss
+  # contribution of BCE segmentation loss
+  # alpha: 1
+  # contribution of DICE segmentation loss
+  # beta: 1
+  # contribution between classifiaction and segmentation loss
+  # gamma: 0.1
+  # weight of positive class to BCE segmentation
+  pos_weight: [2]
+  # weight of all classes to Dice 
+  # weight: [1,  50]
+  # a target value that is ignored and does not contribute to the input gradient
+  ignore_index: null
+# evaluation metric configuration
+eval_metric:
+  name: CustomDiceCoefficient
+  # a target label that is ignored during metric evaluation
+  ignore_index: null
+# learning rate scheduler configuration
+lr_scheduler:
+  # reduce learning rate when evaluation metric plateaus
+  name: OneCycleLR
+  max_lr: 0.001
+  total_steps: 150
+  verbose: true
+  pct_start: 0.05 
+# data loaders configuration
+loaders:
+  # class of the HDF5 dataset, currently StandardHDF5Dataset and LazyHDF5Dataset are supported.
+  # When using LazyHDF5Dataset make sure to set `num_workers = 1`, due to a bug in h5py which corrupts the data
+  # when reading from multiple threads.
+  dataset: LazyHDF5Dataset
+  # batch dimension; if number of GPUs is N > 1, then a batch_size of N * batch_size will automatically be taken for DataParallel
+  batch_size: 1
+  # how many subprocesses to use for data loading
+  num_workers: 12
+  # path to the raw data within the H5
+  raw_internal_path: raw
+  # path to the the label data withtin the H5
+  label_internal_path: label
+  # path to the pixel-wise weight map withing the H5 if present
+  weight_internal_path: null
+  # configuration of the train loader
+  train:
+    # absolute paths to the training datasets; if a given path is a directory all H5 files ('*.h5', '*.hdf', '*.hdf5', '*.hd5')
+    # inside this this directory will be included as well (non-recursively)
+    file_paths:
+      - "your/data/path"
+    # SliceBuilder configuration, i.e. how to iterate over the input volume patch-by-patch
+    slice_builder:
+      name: SliceBuilder
+      # train patch size given to the network (adapt to fit in your GPU mem, generally the bigger patch the better)
+      patch_shape: [192, 256, 256]
+      # train stride between patches
+      stride_shape: [192, 256, 256]
+      # minimum volume of the labels in the patch
+      # threshold: 0.0001
+      # probability of accepting patches which do not fulfil the threshold criterion
+      # slack_acceptance: 0.5
+      # label to filter
+    # data transformations/augmentations
+    transformer:
+      raw:
+        # re-scale the values to be 0-mean and 1-std
+        - name: CustomNormalize
+          min_value: -87
+          max_value: 199
+        # randomly flips an image across randomly chosen axis
+        - name: RandomFlip
+          execution_probability: 0.3
+        # rotate an image by 90 degrees around a randomly chosen plane
+        - name: RandomRotate90
+          execution_probability: 0.3
+        # rotate an image by a random degrees from taken from (-angle_spectrum, angle_spectrum) interval
+        - name: RandomRotate
+          # rotate only in ZY only since most volumetric data is anisotropic
+          axes: [[2, 1]]
+          angle_spectrum: 30
+          execution_probability: 0.3
+        - name: CustomErode
+          execution_probability: 0.3
+          max_iterations: 2
+        - name: CustomDilate
+          execution_probability: 0.3
+          max_iterations: 1
+        #  mode: reflect
+        # apply elasitc deformations of 3D patches on a per-voxel mesh
+        - name: ElasticDeformation
+          spline_order: 3
+        # randomly adjust contrast
+        # - name: RandomContrast
+        # apply additive Gaussian noise
+        - name: CustomAdditiveGaussianNoise
+          execution_probability: 0.3
+          scale: [0, 0.001]
+        # apply additive Poisson noise
+        - name: CustomAdditivePoissonNoise
+          execution_probability: 0.3
+          scale: [0, 0.001]
+        # convert to torch tensor
+        - name: ToTensor
+        # add additional 'channel' axis when the input data is 3D
+          expand_dims: false
+      label:
+        - name: RandomFlip
+          execution_probability: 0.3
+        - name: RandomRotate90
+          execution_probability: 0.3
+        - name: RandomRotate
+          # rotate only in ZY only since most volumetric data is anisotropic
+          axes: [[2, 1]]
+          angle_spectrum: 30
+          execution_probability: 0.3
+        #  mode: reflect
+        - name: ElasticDeformation
+          spline_order: 0
+        - name: ToTensor
+          expand_dims: true
+
+  # configuration of the validation loaders
+  val:
+    # paths to the validation datasets; if a given path is a directory all H5 files ('*.h5', '*.hdf', '*.hdf5', '*.hd5')
+    # inside this this directory will be included as well (non-recursively)
+    file_paths:
+      - "your/data/path"
+    slice_builder:
+      name: SliceBuilder
+      # train patch size given to the network (adapt to fit in your GPU mem, generally the bigger patch the better)
+      patch_shape: [192, 256, 256]
+      # train stride between patches
+      stride_shape: [192, 256, 256]
+      # minimum volume of the labels in the patch
+      # threshold: 0.0001
+      # probability of accepting patches which do not fulfil the threshold criterion
+      # slack_acceptance: 0.1
+
+    transformer:
+      raw:
+        - name: CustomNormalize
+          min_value: -87
+          max_value: 199
+        - name: ToTensor
+          expand_dims: false
+      label:
+        - name: ToTensor
+          expand_dims: true

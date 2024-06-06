@@ -1,0 +1,53 @@
+
+model_path: "/your/data/path/last_checkpoint.pytorch"
+model:
+  name: UNet3D
+  # number of input channels to the model
+  in_channels: 1
+  # number of output channels
+  out_channels: 2
+  # determines the order of operators in a single layer (crg - Conv3d+ReLU+GroupNorm)
+  layer_order: gcl
+  # initial number of feature maps
+  f_maps: 32
+
+  num_levels: 4
+  # number of groups in the groupnorm
+  num_groups: 8
+  # apply element-wise nn.Sigmoid after the final 1x1x1 convolution, otherwise apply nn.Softmax
+  final_sigmoid: true
+  is_segmentation: True
+predictor:
+  name: 'StandardPredictor'
+  prediction_name: ['CBD', 'PD']
+loaders:
+  # save predictions to output_dir
+  output_dir: "your/data/path/h5_CBD_PD"
+
+  dataset: StandardHDF5Dataset
+  # batch dimension; if number of GPUs is N > 1, then a batch_size of N * batch_size will automatically be taken for DataParallel
+  batch_size: 1
+  ## how many subprocesses to use for data loading
+  num_workers: 4
+  # path to the raw data within the H5
+  raw_internal_path: raw
+  # path to the pixel-wise weight map withing the H5 if present
+  weight_internal_path: null
+  # test loaders configuration
+  test:
+    file_paths:
+      - "your/data/path/h5_CT_CBD_PD"
+    slice_builder:
+      name: SliceBuilder
+      patch_shape: [128, 128, 128]
+      # train stride between patches
+      stride_shape: [32, 32, 32]
+
+
+    transformer:
+      raw:
+        - name: Normalize
+          min_value: -87
+          max_value: 199
+        - name: ToTensor
+          expand_dims: True

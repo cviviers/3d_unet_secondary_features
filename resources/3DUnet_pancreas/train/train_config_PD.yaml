@@ -1,0 +1,195 @@
+# First config file for pancreas dataset ductal segmentation 
+# Use input of CT scan and pancreas  
+
+manual_seed: 1
+name: 'PD_temp'
+# model configuration
+model:
+  # model class, e.g. UNet3D, ResidualUNet3D
+  name: UNet3D
+  # number of input channels to the model
+  in_channels: 1
+  # number of output channels
+  out_channels: 1
+  # determines the order of operators in a single layer (gcr - GroupNorm+Conv3d+ReLU)
+  layer_order: gcl
+  # number of features at each level of the U-Net
+  f_maps: 32
+  num_levels: 4
+  # number of groups in the groupnorm
+  num_groups: 8
+  # apply element-wise nn.Sigmoid after the final 1x1 convolution, otherwise apply nn.Softmax
+  # this is only relevant during inference, during training the network outputs logits and it is up to the loss function
+  # to normalize with Sigmoid or Softmax
+  # final_sigmoid in the model config section applies only to the inference time (validation, test): 
+  # When training with cross entropy based losses (WeightedCrossEntropyLoss, CrossEntropyLoss, PixelWiseCrossEntropyLoss) 
+  # set final_sigmoid=False so that Softmax normalization is applied to the output. 
+  # When training with BCEWithLogitsLoss, DiceLoss, BCEDiceLoss, GeneralizedDiceLoss set final_sigmoid=True
+  final_sigmoid: True
+  # if True applies the final normalization layer (sigmoid or softmax), otherwise the networks returns the output from the final convolution layer; use False for regression problems, e.g. de-noising
+  is_segmentation: True
+# trainer configuration
+trainer:
+  # path to the checkpoint directory
+  checkpoint_dir: Checkpoints_various/PD_temp
+  # path to latest checkpoint; if provided the training will be resumed from that checkpoint
+  resume: null
+  # path to the best_checkpoint.pytorch; to be used for fine-tuning the model with additional ground truth
+  # make sure to decrease the learning rate in the optimizer config accordingly
+  pre_trained: null
+  # how many iterations between validations
+  validate_after_iters: 1
+  # how many iterations between tensorboard logging
+  log_after_iters: 1
+  # max number of epochs
+  max_num_epochs: 500
+  # max number of iterations
+  max_num_iterations: 60000
+  # model with higher eval score is considered better
+  eval_score_higher_is_better: True
+# loss function configuration
+loss:
+  # use BCE loss for training
+  name: 'BCEWithLogitsLoss'
+  pos_weight: 9
+  # BCE factor
+  # alpha: 1.0
+  # Dice factor
+  # beta: 1.0
+  # A manual rescaling weight given to each class.
+  weight: null
+  # a target value that is ignored and does not contribute to the input gradient
+  ignore_index: null
+# optimizer configuration
+optimizer:
+  # initial learning rate
+  learning_rate: 0.000104
+  # weight decay
+  weight_decay: 0.00001
+# evaluation metric configuration
+eval_metric:
+  # use average precision metric
+  name: DiceCoefficient
+  # a target label that is ignored during metric evaluation
+  # thresholds: [0.4, 0.5, 0.6, 0.7, 0.8]
+  # metric: 'ap'
+  ignore_index: null
+# learning rate scheduler configuration
+lr_scheduler:
+  # reduce learning rate when evaluation metric plateaus
+  name: ReduceLROnPlateau
+  # use 'max' if eval_score_higher_is_better=True, 'min' otherwise
+  mode: max
+  # factor by which learning rate will be reduced
+  factor: 0.000113
+  # number of *validation runs* with no improvement after which learning rate will be reduced
+  patience: 12
+# data loaders configuration
+loaders:
+  # class of the HDF5 dataset, currently StandardHDF5Dataset and LazyHDF5Dataset are supported.
+  # When using LazyHDF5Dataset make sure to set `num_workers = 1`, due to a bug in h5py which corrupts the data
+  # when reading from multiple threads.
+  dataset: StandardHDF5Dataset
+  # batch dimension; if number of GPUs is N > 1, then a batch_size of N * batch_size will automatically be taken for DataParallel
+  batch_size: 1
+  # how many subprocesses to use for data loading
+  num_workers: 4
+  # path to the raw data within the H5
+  raw_internal_path: raw
+  # path to the the label data withtin the H5
+  label_internal_path: label
+  # path to the pixel-wise weight map withing the H5 if present
+  weight_internal_path: null
+  # configuration of the train loader
+  train:
+    # absolute paths to the training datasets; if a given path is a directory all H5 files ('*.h5', '*.hdf', '*.hdf5', '*.hd5')
+    # inside this this directory will be included as well (non-recursively)
+    file_paths:
+      - "your/data/path"
+
+    # SliceBuilder configuration, i.e. how to iterate over the input volume patch-by-patch
+    slice_builder:
+      # SliceBuilder class
+      name: FilterSliceBuilder
+      # train patch size given to the network (adapt to fit in your GPU mem, generally the bigger patch the better)
+      patch_shape: [128, 128, 128] 
+      # train stride between patches
+      stride_shape: [32, 32, 32]
+      # minimum volume of the labels in the patch
+      threshold: 0.01
+      # probability of accepting patches which do not fulfil the threshold criterion
+      slack_acceptance: 0.03
+
+    transformer:
+      raw:
+        # re-scale the values to be 0-mean and 1-std
+        # - name: Normalize
+        #   min_value: -1000
+        #   max_value: 2000
+        # randomly flips an image across randomly chosen axis
+        # - name: RandomFlip
+        # rotate an image by 90 degrees around a randomly chosen plane
+        # - name: RandomRotate90
+        # rotate an image by a random degrees from taken from (-angle_spectrum, angle_spectrum) interval
+        - name: RandomRotate
+          # rotate only in ZY plane due to anisotropy
+          axes: [[2, 1]]
+          # rotates by choosing random angle from [-30, 30] deg
+          angle_spectrum: 30
+          mode: reflect
+        # apply elasitc deformations of 3D patches on a per-voxel mesh
+        - name: ElasticDeformation
+          spline_order: 3
+          execution_probability: 0.8
+        # # randomly adjust contrast
+        # - name: RandomContrast
+        #   execution_probability: 0.8
+        #   mean: 0.0
+        # convert to torch tensor
+        - name: ToTensor
+          # add additional 'channel' axis when the input data is 3D
+          expand_dims: True
+      label:
+        # - name: RandomFlip
+        # - name: RandomRotate90
+        - name: RandomRotate
+          # execution_probability: 0.7
+          # rotate only in ZY plane due to anisotropy
+          axes: [[2, 1]]
+          angle_spectrum: 30
+          mode: reflect
+        - name: ElasticDeformation
+          spline_order: 3
+          execution_probability: 0.8
+            
+        - name: ToTensor
+          expand_dims: True
+
+  # configuration of the validation loaders
+  val:
+    # paths to the validation datasets; if a given path is a directory all H5 files ('*.h5', '*.hdf', '*.hdf5', '*.hd5')
+    # inside this this directory will be included as well (non-recursively)
+    file_paths:
+      - "your/data/path"
+
+    # SliceBuilder configuration
+    slice_builder:
+      # SliceBuilder class
+      name: SliceBuilder
+      # validation patch (can be bigger than train patch since there is no backprop)
+      patch_shape: [128, 128, 128]
+      # validation stride (validation patches doesn't need to overlap)
+      stride_shape: [32, 32, 32]
+      # minimum volume of the labels in the patch
+
+    # data augmentation
+    transformer:
+      raw:
+        - name: ToTensor
+          expand_dims: True
+      label:
+        # - name: BlobsToMask
+          # append_label: true
+          # boundary: false
+        - name: ToTensor
+          expand_dims: True
