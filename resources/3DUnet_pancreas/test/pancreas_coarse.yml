@@ -42,7 +42,7 @@ loaders:
       name: SliceBuilder
       patch_shape: [64, 128, 128] 
       # train stride between patches
-      stride_shape: [50, 80, 80]
+      stride_shape: [32, 64, 64]
 
 
     transformer:

@@ -39,7 +39,7 @@ loaders:
       - '/your/data/path/h5_CT_Pancreas'
     slice_builder:
       name: SliceBuilder
-      patch_shape: [128, 128, 128]
+      patch_shape: [64, 128, 128]
       # train stride between patches
       stride_shape: [32, 32, 32]
 

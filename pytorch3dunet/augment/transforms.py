@@ -854,7 +854,112 @@ class CustomNormalize:
         norm_0_1 = (m[0] - self.min_value) / self.value_range
         m[0] = np.clip(2 * norm_0_1 - 1, -1, 1)
         return m
+    
 
+class CustomErode:
+    def __init__(self, random_state, max_iterations=1, execution_probability=0.1, **kwargs):
+        self.execution_probability = execution_probability
+        self.random_state = random_state
+        self.max_iterations = max_iterations
+
+
+    def __call__(self, m):
+        if self.random_state.uniform() < self.execution_probability:
+            for idx in range(3):
+
+                if self.max_iterations != 1:
+                    iterations =  self.random_state.randint(1, self.max_iterations)  
+                else:
+                    iterations = 1
+
+                m[idx+1, ...] = binary_erosion(m[idx+1, ...], iterations=iterations )
+        return m
+
+class CustomDilate:
+    def __init__(self, random_state, max_iterations=1, execution_probability=0.1, **kwargs):
+        self.execution_probability = execution_probability
+        self.random_state = random_state
+        self.max_iterations = max_iterations
+
+
+    def __call__(self, m):
+        if self.random_state.uniform() < self.execution_probability:
+            for idx in range(3):
+                if self.max_iterations != 1:
+                    iterations =  self.random_state.randint(1, self.max_iterations)  
+                else:
+                    iterations = 1
+                m[idx+1, ...] = binary_dilation(m[idx+1, ...], iterations=iterations )
+        return m
+
+class CustomAdditiveGaussianNoise:
+    def __init__(self, random_state, scale=(0.0, 1.0), execution_probability=0.1, **kwargs):
+        self.execution_probability = execution_probability
+        self.random_state = random_state
+        self.scale = scale
+
+    def __call__(self, m):
+        if self.random_state.uniform() < self.execution_probability:
+            std = self.random_state.uniform(self.scale[0], self.scale[1])
+            gaussian_noise = self.random_state.normal(0, std, size=m[0].shape)
+            m[0] = m[0] + gaussian_noise
+        return m
+    
+
+class CustomAdditivePoissonNoise:
+    def __init__(self, random_state, lam=(0.0, 1.0), execution_probability=0.1, **kwargs):
+        self.execution_probability = execution_probability
+        self.random_state = random_state
+        self.lam = lam
+
+    def __call__(self, m):
+        if self.random_state.uniform() < self.execution_probability:
+            lam = self.random_state.uniform(self.lam[0], self.lam[1])
+            poisson_noise = self.random_state.poisson(lam, size=m[0].shape)
+            m[0] = m[0] + poisson_noise
+        return m
+    
+class CustomMultiplicavePoissonNoise:
+    def __init__(self, random_state, lam=(1.0, 1.2), execution_probability=0.1, **kwargs):
+        self.execution_probability = execution_probability
+        self.random_state = random_state
+        self.lam = lam
+
+    def __call__(self, m):
+        if self.random_state.uniform() < self.execution_probability:
+            lam = self.random_state.uniform(self.lam[0], self.lam[1])
+            poisson_noise = self.random_state.poisson(lam, size=m[0].shape)
+            m = m * poisson_noise
+        return m
+    
+
+class AdditiveGaussianNoise:
+    def __init__(self, random_state, scale=(0.0, 1.0), execution_probability=0.1, **kwargs):
+        self.execution_probability = execution_probability
+        self.random_state = random_state
+        self.scale = scale
+
+    def __call__(self, m):
+        if self.random_state.uniform() < self.execution_probability:
+            std = self.random_state.uniform(self.scale[0], self.scale[1])
+            gaussian_noise = self.random_state.normal(0, std, size=m.shape)
+            return m + gaussian_noise
+        return m
+
+
+class AdditivePoissonNoise:
+    def __init__(self, random_state, lam=(0.0, 1.0), execution_probability=0.1, **kwargs):
+        self.execution_probability = execution_probability
+        self.random_state = random_state
+        self.lam = lam
+
+    def __call__(self, m):
+        if self.random_state.uniform() < self.execution_probability:
+            lam = self.random_state.uniform(self.lam[0], self.lam[1])
+            poisson_noise = self.random_state.poisson(lam, size=m.shape)
+            return m + poisson_noise
+        return m
+    
 class Relabel:
     """
     Relabel a numpy array of labels into a consecutive numbers, e.g.

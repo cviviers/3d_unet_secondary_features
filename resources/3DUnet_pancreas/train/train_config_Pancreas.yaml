@@ -111,7 +111,7 @@ loaders:
       # SliceBuilder class
       name: FilterSliceBuilder
       # train patch size given to the network (adapt to fit in your GPU mem, generally the bigger patch the better)
-      patch_shape: [128, 128, 128] 
+      patch_shape: [64, 128, 128] 
       # train stride between patches
       stride_shape: [32, 32, 32]
       # minimum volume of the labels in the patch
@@ -176,7 +176,7 @@ loaders:
       # SliceBuilder class
       name: SliceBuilder
       # validation patch (can be bigger than train patch since there is no backprop)
-      patch_shape: [128, 128, 128]
+      patch_shape: [64, 128, 128]
       # validation stride (validation patches doesn't need to overlap)
       stride_shape: [32, 32, 32]
       # minimum volume of the labels in the patch
