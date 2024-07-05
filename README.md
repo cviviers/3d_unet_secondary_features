@@ -4,7 +4,7 @@ Resources shared as part the papers:
 1. [Improved Pancreatic Tumor Detection by Utilizing Clinically-Relevant Secondary Features](https://arxiv.org/abs/2208.03581) - MICCAI Cancer Prevention through early detection, Conference
 2. [Computer-Aided Detection for Pancreatic Cancer Diagnosis: Radiological Challenges and Future Directions](https://www.mdpi.com/2077-0383/12/13/4209) - Journal of Clincal Medicine
 3. [Clinical Segmentation for Improved Pancreatic Ductal Adenocarcinoma Detection and Segmentation](https://www.spiedigitallibrary.org/conference-proceedings-of-spie/12465/124652M/Clinical-segmentation-for-improved-pancreatic-ductal-adenocarcinoma-detection-and-segmentation/10.1117/12.2654164.short) - SPIE Medical Imaging, Conference
-4.[Improved Pancreatic Cancer Detection and Localization on CT scans: A Computer-Aided Detection model utilizing Secondary Features](https://www.mdpi.com/2072-6694/16/13/2403) - Cancers, journal
+4. [Improved Pancreatic Cancer Detection and Localization on CT scans: A Computer-Aided Detection model utilizing Secondary Features](https://www.mdpi.com/2072-6694/16/13/2403) - Cancers, journal
 
 # Example usage for PDAC detection
 
