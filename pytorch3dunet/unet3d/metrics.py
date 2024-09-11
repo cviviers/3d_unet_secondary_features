@@ -28,6 +28,50 @@ class DiceCoefficient:
         # Average across channels in order to get the final score
         return torch.mean(compute_per_channel_dice(input, target, epsilon=self.epsilon))
 
+class CustomDiceCoefficient:
+    """Computes Dice Coefficient.
+  
+    """
+
+    def __init__(self, epsilon=1e-6, threshold = 0.5, **kwargs):
+        self.epsilon = epsilon
+        self.threshold = threshold
+
+    def __call__(self, input, target):
+        predicted_mask = input.clone().detach()
+        predicted_mask = torch.tensor(predicted_mask > self.threshold, dtype=torch.uint8)
+        # input = torch.tensor(input > self.threshold,  dtype=torch.uint8)
+        target = torch.tensor(target,  dtype=torch.uint8)
+        # Average across channels in order to get the final score
+        return torch.tensor(np.nanmean(compute_dice_score(target, predicted_mask, target.shape[1], ignore_mask=None)))
+    
+
+def compute_tp_fp_fn_tn(mask_ref: torch.tensor, mask_pred: torch.tensor, ignore_mask: torch.tensor = None):
+    if ignore_mask is None:
+        use_mask = torch.ones_like(mask_ref, dtype=bool)
+    else:
+        use_mask = ~ignore_mask
+    tp = torch.sum((mask_ref & mask_pred) & use_mask)
+    fp = torch.sum(((~mask_ref) & mask_pred) & use_mask)
+    fn = torch.sum((mask_ref & (~mask_pred)) & use_mask)
+    tn = torch.sum(((~mask_ref) & (~mask_pred)) & use_mask)
+    return tp, fp, fn, tn
+
+
+def compute_dice_score(mask_ref: torch.tensor, mask_pred: torch.tensor, labels_or_regions: int, ignore_mask: torch.tensor = None, ):
+
+    dice = []
+    for r in range(labels_or_regions):
+
+        class_mask_ref = mask_ref[:,r, ...] # B, z, y, x
+        class_mask_pred = mask_pred[:, r, ...]
+
+        tp, fp, fn, tn = compute_tp_fp_fn_tn(class_mask_ref, class_mask_pred, ignore_mask[r] if ignore_mask is not None else None)
+        if tp + fp + fn == 0:
+            dice.append(np.nan)
+        else:
+            dice.append((2 * tp / (2 * tp + fp + fn)).cpu().numpy())
+    return dice
 
 class MeanIoU:
     """
